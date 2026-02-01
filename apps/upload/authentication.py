@@ -37,9 +37,28 @@ class FirebaseAuthentication(authentication.BaseAuthentication):
     def __init__(self):
         # Initialize Firebase Admin SDK once
         if not firebase_admin._apps:
+            # 1. Try JSON string from environment variable (Common for Cloud/Render)
+            cred_json = os.environ.get('FIREBASE_CREDENTIALS_JSON')
+            print(f"DEBUG: FIREBASE_CREDENTIALS_JSON exists: {bool(cred_json)}")
+            if cred_json:
+                print(f"DEBUG: FIREBASE_CREDENTIALS_JSON length: {len(cred_json)}")
+                print(f"DEBUG: FIREBASE_CREDENTIALS_JSON starts with: {cred_json[:50] if len(cred_json) > 50 else cred_json}")
+                try:
+                    import json
+                    cred_dict = json.loads(cred_json)
+                    print(f"DEBUG: Parsed JSON keys: {list(cred_dict.keys())}")
+                    cred = credentials.Certificate(cred_dict)
+                    firebase_admin.initialize_app(cred)
+                    print("DEBUG: Firebase initialized from JSON string.")
+                    return
+                except json.JSONDecodeError as e:
+                    print(f"DEBUG: JSON parsing error: {str(e)}")
+                except Exception as e:
+                    print(f"DEBUG: Error initializing from JSON string: {str(e)}")
+
+            # 2. Try file path
             cred_path = os.environ.get('FIREBASE_CREDENTIALS_PATH')
             if cred_path:
-                # Remove quotes if they exist
                 cred_path = cred_path.strip('"').strip("'")
                 
             print(f"DEBUG: Firebase path: {cred_path}")
@@ -47,16 +66,22 @@ class FirebaseAuthentication(authentication.BaseAuthentication):
                 try:
                     cred = credentials.Certificate(cred_path)
                     firebase_admin.initialize_app(cred)
-                    print("DEBUG: Firebase Admin SDK initialized successfully.")
+                    print("DEBUG: Firebase initialized from file.")
+                    return
                 except Exception as e:
-                    print(f"DEBUG: Error initializing Firebase: {str(e)}")
+                    print(f"DEBUG: Error initializing from file: {str(e)}")
             else:
                 print(f"DEBUG: Firebase credentials file not found at {cred_path}")
-                # For development without credentials file
-                try:
-                    firebase_admin.initialize_app()
-                except ValueError:
-                    pass
+
+            # 3. Fallback: Initialize with project ID from environment
+            project_id = os.environ.get('GOOGLE_CLOUD_PROJECT') or os.environ.get('FIREBASE_PROJECT_ID', 'findcarhome')
+            print(f"DEBUG: Attempting fallback with project_id: {project_id}")
+            try:
+                # Initialize without credentials but with project ID
+                firebase_admin.initialize_app(options={'projectId': project_id})
+                print(f"DEBUG: Firebase initialized with project ID fallback: {project_id}")
+            except Exception as e:
+                print(f"DEBUG: Final fallback failed: {str(e)}")
 
     
     def authenticate(self, request):
